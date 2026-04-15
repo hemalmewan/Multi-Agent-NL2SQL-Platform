@@ -1,0 +1,144 @@
+# =============================================================================
+# models.yaml — LLM Provider & Model Routing Configuration
+# =============================================================================
+#
+# Purpose:
+#   Defines the canonical model identifiers used by each supported LLM provider,
+#   organised by task tier. The application reads this file to resolve which
+#   model to call based on the selected provider and the complexity of the task.
+#
+# Structure:
+#   <provider>:          # Top-level key — one entry per supported API provider.
+#     chat:              # Interaction modality (currently "chat" / completion).
+#       general: <id>    # Tier 1 — fast, low-cost model for routine tasks.
+#       strong:  <id>    # Tier 2 — most capable model for complex tasks.
+#       reason:  <id>    # Tier 3 — reasoning-optimised model for multi-step
+#                        #          chain-of-thought or agentic workflows.
+#
+# Tiers explained:
+#   general  Fast, inexpensive models suited for summarisation, simple Q&A,
+#            classification, and high-throughput workloads where cost matters.
+#   strong   Frontier-class models that maximise response quality at the
+#            expense of higher latency and cost. Use for complex analysis,
+#            long-context tasks, and nuanced generation.
+#   reason   Models purpose-built (or fine-tuned) for systematic reasoning —
+#            mathematics, code debugging, logic puzzles, and agent planning
+#            where intermediate "thinking" steps matter.
+#
+# How to add a new provider:
+#   1. Add a top-level key matching the provider name used in the codebase.
+#   2. Supply model IDs for all three tiers under `chat:`.
+#   3. Ensure the corresponding API key / SDK integration exists in the app.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# OpenRouter
+# -----------------------------------------------------------------------------
+# A unified meta-provider that proxies requests to 200+ underlying models via
+# a single OpenAI-compatible API endpoint (https://openrouter.ai).
+# Model IDs must be prefixed with the source provider namespace
+# (e.g. "openai/gpt-4o-mini"), which OpenRouter uses to route the request.
+# Useful for: provider fallback, cost comparison, and accessing models that
+# lack a direct SDK without changing application code.
+# -----------------------------------------------------------------------------
+openrouter:
+  chat:
+    general: openai/gpt-4o-mini       # GPT-4o Mini via OpenRouter proxy
+    strong: openai/gpt-4o             # GPT-4o via OpenRouter proxy
+    reason: openai/o3-mini            # o3-Mini (OpenAI reasoning) via OpenRouter
+
+# -----------------------------------------------------------------------------
+# OpenAI
+# -----------------------------------------------------------------------------
+# Direct access to OpenAI's production API (https://api.openai.com).
+# Model IDs are bare strings without a provider prefix.
+#   general — gpt-4o-mini: Cost-optimised multimodal model; ~8× cheaper than
+#             GPT-4o with strong performance on most everyday tasks.
+#   strong  — gpt-4o: OpenAI's flagship multimodal model; best quality for
+#             complex reasoning, vision, and long-context understanding.
+#   reason  — o3-mini: Compact reasoning model in the o-series; uses internal
+#             chain-of-thought to excel at math, science, and coding tasks.
+# -----------------------------------------------------------------------------
+openai:
+  chat:
+    general: gpt-4o-mini
+    strong: gpt-4o
+    reason: o3-mini
+
+# -----------------------------------------------------------------------------
+# Anthropic
+# -----------------------------------------------------------------------------
+# Direct access to Anthropic's Claude API (https://api.anthropic.com).
+# Model IDs include a date-stamped version suffix for reproducibility.
+#   general — claude-3-haiku-20240307: Fastest and most compact Claude 3 model;
+#             optimised for near-instant responses and high-throughput pipelines.
+#   strong  — claude-3-5-sonnet-20241022: Anthropic's highest-intelligence model
+#             at time of config; excels at nuanced writing, analysis, and coding.
+#   reason  — claude-3-5-sonnet-20241022: Reused for reasoning tier because
+#             Claude 3.5 Sonnet natively exhibits strong chain-of-thought
+#             behaviour without a separate reasoning-specific variant.
+# -----------------------------------------------------------------------------
+anthropic:
+  chat:
+    general: claude-3-haiku-20240307
+    strong: claude-3-5-sonnet-20241022
+    reason: claude-3-5-sonnet-20241022
+
+# -----------------------------------------------------------------------------
+# Google
+# -----------------------------------------------------------------------------
+# Access to Google's Gemini model family via Google AI Studio or Vertex AI.
+#   general — gemini-2.5-flash: Low-latency, cost-efficient Gemini model;
+#             designed for real-time applications and large-volume workloads.
+#             Supports a 1M-token context window.
+#   strong  — gemini-2.5-pro: Google's most capable Gemini model; strongest
+#             performance on coding benchmarks, multimodal tasks, and reasoning.
+#             Also supports a 1M-token context window.
+#   reason  — gemini-2.5-pro: Reused for the reasoning tier; Gemini 2.5 Pro
+#             includes built-in "thinking" capabilities for complex reasoning.
+# -----------------------------------------------------------------------------
+google:
+  chat:
+    general: gemini-2.5-flash
+    strong: gemini-2.5-pro
+    reason: gemini-2.5-pro
+
+# -----------------------------------------------------------------------------
+# Groq
+# -----------------------------------------------------------------------------
+# Inference platform (https://groq.com) running open-weight models on custom
+# LPU (Language Processing Unit) hardware for ultra-low-latency responses
+# (typically 300–800 tokens/sec). Ideal for latency-sensitive applications.
+#   general — llama-3.1-8b-instant: Meta's Llama 3.1 8B parameter model;
+#             extremely fast on Groq hardware, suitable for simple completions.
+#   strong  — llama-3.1-70b-versatile: Meta's Llama 3.1 70B model; significantly
+#             more capable than the 8B variant for complex generation tasks.
+#   reason  — deepseek-r1-distill-llama-70b: DeepSeek-R1 reasoning model
+#             distilled into a Llama-70B backbone; combines strong reasoning
+#             with Groq's high-throughput inference.
+# -----------------------------------------------------------------------------
+groq:
+  chat:
+    general: llama-3.1-8b-instant
+    strong: llama-3.1-70b-versatile
+    reason: deepseek-r1-distill-llama-70b
+
+# -----------------------------------------------------------------------------
+# DeepSeek
+# -----------------------------------------------------------------------------
+# Direct access to DeepSeek's API (https://api.deepseek.com), which exposes
+# DeepSeek's own open-weight models. Pricing is competitive, particularly for
+# high-volume reasoning workloads.
+#   general — deepseek-chat: DeepSeek's general-purpose chat model (DeepSeek-V3
+#             family); strong coding and instruction-following at low cost.
+#   strong  — deepseek-chat: Reused for the strong tier; DeepSeek-V3 is already
+#             a frontier-class model competitive with GPT-4o on many benchmarks.
+#   reason  — deepseek-reasoner: DeepSeek-R1, a dedicated reasoning model that
+#             uses extended chain-of-thought internally before producing a final
+#             answer; excels at mathematics, formal logic, and code generation.
+# -----------------------------------------------------------------------------
+deepseek:
+  chat:
+    general: deepseek-chat
+    strong: deepseek-chat
+    reason: deepseek-reasoner

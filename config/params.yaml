@@ -1,0 +1,112 @@
+# =============================================================================
+# params.yaml — Runtime Configuration for LLM Inference & Observability
+# =============================================================================
+#
+# Purpose:
+#   Controls the runtime behaviour of the application — which provider and
+#   model tier to use by default, how the LLM generates output, and whether
+#   observability/tracing is active. These settings are provider-agnostic;
+#   the actual model IDs are resolved from config/models.yaml at runtime.
+#
+# Structure:
+#   provider:       Which LLM backend to call and at what capability tier.
+#   llm:            Generation hyperparameters passed to the model on every call.
+#   observability:  Tracing / logging toggle for monitoring inference pipelines.
+#
+# Precedence:
+#   Values here are treated as application-level defaults. Environment variables
+#   or programmatic overrides (e.g. per-request kwargs) take precedence where
+#   supported by the codebase.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# provider — Backend Selection
+# -----------------------------------------------------------------------------
+# Determines which entry in config/models.yaml is loaded and, optionally,
+# the base URL used to reach the provider's API.
+#
+#   default            Name of the active provider. Must match a top-level key
+#                      in models.yaml (e.g. openai, anthropic, google, groq,
+#                      deepseek, openrouter). Changing this key switches every
+#                      LLM call in the application to the new provider without
+#                      any code changes.
+#
+#   tier               Model capability tier to use within the chosen provider.
+#                      Must be one of:
+#                        general  — fast, low-cost model for routine tasks.
+#                        strong   — frontier model for complex tasks.
+#                        reason   — reasoning-optimised model for chain-of-thought
+#                                   and agentic workflows.
+#                      The tier is looked up under models.yaml →
+#                      <provider>.chat.<tier> to resolve the concrete model ID.
+#
+#   openrouter_base_url  Override for the HTTP base URL used when the
+#                        "openrouter" provider is selected. Defaults to the
+#                        official OpenRouter endpoint. Only consulted when
+#                        default == openrouter; has no effect for other
+#                        providers. Useful for pointing at a local proxy or a
+#                        staging environment.
+# -----------------------------------------------------------------------------
+provider:
+  default: openrouter
+  tier: general
+  openrouter_base_url: https://openrouter.ai/api/v1
+
+# -----------------------------------------------------------------------------
+# llm — Generation Hyperparameters
+# -----------------------------------------------------------------------------
+# Parameters forwarded to the model's completion/chat endpoint on every call.
+# These act as application-wide defaults and can typically be overridden on a
+# per-request basis in code.
+#
+#   temperature    Controls output randomness (0.0 – 2.0 for most providers).
+#                    0.0  Fully deterministic; always picks the highest-
+#                         probability token. Best for factual retrieval, JSON
+#                         extraction, and classification.
+#                    0.2  Near-deterministic with slight variation; good balance
+#                         for structured generation (code, analysis, summaries)
+#                         where consistency matters but some flexibility helps.
+#                    0.7+ More creative / diverse outputs; suited for
+#                         brainstorming, creative writing, or exploration.
+#                  Current value (0.2) is intentionally low to keep responses
+#                  focused and reproducible across runs.
+#
+#   max_tokens     Hard cap on the number of tokens the model may generate in
+#                  a single response. Prevents runaway completions and controls
+#                  cost. 3000 tokens ≈ ~2 250 words — sufficient for detailed
+#                  answers while avoiding excessively long outputs.
+#                  Increase for tasks that require long-form generation (e.g.
+#                  full code files, detailed reports). Note: this is the output
+#                  budget only; it does not affect the input/context window.
+#
+#   streaming      When true, the provider streams tokens back incrementally
+#                  (server-sent events), enabling the UI to render partial
+#                  responses in real time. When false (current), the full
+#                  response is buffered server-side and returned in one payload.
+#                  Set to true for interactive chat interfaces where perceived
+#                  latency matters; keep false for batch pipelines or when the
+#                  downstream code expects a complete response object.
+# -----------------------------------------------------------------------------
+llm:
+  temperature: 0.2
+  max_tokens: 3000
+  streaming: false
+
+# -----------------------------------------------------------------------------
+# observability — Tracing & Logging
+# -----------------------------------------------------------------------------
+# Governs whether the application emits traces, spans, or structured logs for
+# each LLM call. When enabled, the observability layer records request/response
+# metadata (model, tokens used, latency, etc.) to support debugging, cost
+# tracking, and performance analysis.
+#
+#   enabled    true   Activates the observability integration. Traces are
+#                     emitted to the configured backend (e.g. LangSmith,
+#                     Weights & Biases, OpenTelemetry collector). Recommended
+#                     for development and production monitoring.
+#              false  Disables all tracing. Use in environments where the
+#                     observability backend is unavailable or where telemetry
+#                     data must not leave the network.
+# -----------------------------------------------------------------------------
+observability:
+  enabled: true

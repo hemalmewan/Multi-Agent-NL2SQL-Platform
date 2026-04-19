@@ -1,0 +1,16 @@
+openai
+langchain
+langfuse
+loguru
+pyyaml
+dotenv
+python-dotenv
+langchain-core
+supabase
+tiktoken
+ipykernel
+langchain-openai
+langchain-anthropic
+langchain-google-genai
+langchain-groq
+langchain-community

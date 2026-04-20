@@ -1,0 +1,104 @@
+tables:
+  patients:
+    keywords: ["patient", "patients", "person", "individual", "age", "gender"]
+
+  doctors:
+    keywords: ["doctor", "doctors", "physician", "consultant", "medical staff"]
+
+  specialties:
+    keywords: ["specialty", "specialties", "field", "expertise", "discipline"]
+
+  admissions:
+    keywords:
+      ["admission", "admissions", "hospitalization", "inpatient", "admit"]
+
+  appointments:
+    keywords:
+      ["appointment", "appointments", "booking", "schedule", "visit time"]
+
+  diagnoses:
+    keywords: ["diagnosis", "diagnoses", "disease", "condition", "illness"]
+
+  lab_orders:
+    keywords: ["lab", "test", "lab test", "lab order", "medical test", "report"]
+
+  prescriptions:
+    keywords:
+      ["prescription", "prescriptions", "medicine", "drug", "medication"]
+
+  billing_invoices:
+    keywords: ["invoice", "billing", "bill", "charges", "invoice amount"]
+
+  payments:
+    keywords:
+      ["payment", "payments", "revenue", "income", "amount", "transaction"]
+
+  departments:
+    keywords: ["department", "departments", "unit", "ward", "division"]
+
+  staff:
+    keywords: ["staff", "employee", "workers", "hospital staff", "personnel"]
+
+relationships:
+  - from: doctors.specialty_id
+    to: specialties.specialty_id
+
+  - from: doctors.department_id
+    to: departments.department_id
+
+  - from: staff.department_id
+    to: departments.department_id
+
+  - from: appointments.patient_id
+    to: patients.patient_id
+
+  - from: appointments.doctor_id
+    to: doctors.doctor_id
+
+  - from: admissions.patient_id
+    to: patients.patient_id
+
+  - from: admissions.doctor_id
+    to: doctors.doctor_id
+
+  - from: admissions.department_id
+    to: departments.department_id
+
+  - from: diagnoses.patient_id
+    to: patients.patient_id
+
+  - from: diagnoses.doctor_id
+    to: doctors.doctor_id
+
+  - from: diagnoses.admission_id
+    to: admissions.admission_id
+
+  - from: lab_orders.patient_id
+    to: patients.patient_id
+
+  - from: lab_orders.doctor_id
+    to: doctors.doctor_id
+
+  - from: lab_orders.appointment_id
+    to: appointments.appointment_id
+
+  - from: prescriptions.appointment_id
+    to: appointments.appointment_id
+
+  - from: prescriptions.doctor_id
+    to: doctors.doctor_id
+
+  - from: prescriptions.patient_id
+    to: patients.patient_id
+
+  - from: billing_invoices.admission_id
+    to: admissions.admission_id
+
+  - from: billing_invoices.patient_id
+    to: patients.patient_id
+
+  - from: payments.invoice_id
+    to: billing_invoices.invoice_id
+
+  - from: payments.patient_id
+    to: patients.patient_id

@@ -593,7 +593,7 @@ Initialised to ``None`` and populated on the first call to
 ``_global_llm_provider()`` rather than this variable directly.
 """
 
-def _global_llm_provider() -> LLMProvider:
+def _global_llm_provider(config:Optional[Dict[str,Any]]=None) -> LLMProvider:
     """Return the module-level singleton ``LLMProvider``, creating it if needed.
 
     Uses the lazy-initialisation pattern: the provider is constructed only
@@ -627,6 +627,6 @@ def _global_llm_provider() -> LLMProvider:
     global _global_llm_instance
 
     if _global_llm_instance is None:
-        _global_llm_instance=_llm_service_provider()
+        _global_llm_instance=_llm_service_provider(config=config)
 
     return _global_llm_instance

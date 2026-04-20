@@ -130,7 +130,7 @@ class RouterIntent:
         """
         if not isinstance(user_query, str) or not user_query.strip():
             logger.error("Invalid user_query provided", value=user_query)
-            raise ValueError("user_query must be a non-empty string")
+            raise ValueError("user query must be a non-empty string")
 
         prompt = f"User Query:{user_query}"
 
@@ -148,9 +148,9 @@ class RouterIntent:
 
             return {
                 "intent": intent,
-                "latency_ms": response.get("latency_ms"),
-                "total_tokens": response.get("total_tokens"),
-                "token_cost": response.get("token_cost"),
+                "latency_ms": response.get("latency_ms",0),
+                "total_tokens": response.get("total_tokens",0),
+                "token_cost": response.get("token_cost",0),
             }
 
         except Exception as e:

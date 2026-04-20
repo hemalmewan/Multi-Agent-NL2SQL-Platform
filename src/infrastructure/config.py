@@ -192,6 +192,7 @@ def _get_nestead(data: Dict[str, Any], *keys, default=None):
 ##====================================
 _CONFIG=_load_yaml(filename="params.yaml")
 _MODELS=_load_yaml(filename="models.yaml")
+_SCHEMA=_load_yaml(filename="schema.yaml")
 
 ##==========================
 ## Provider Configuration
@@ -492,6 +493,21 @@ def _get_all_models() -> Dict[str, Any]:
         if the file was not found or could not be parsed.
     """
     return _MODELS
+
+##======================
+## Get schema file
+##======================
+def _get_schema() -> Dict[str, Any]:
+    """Return the parsed contents of ``schema.yaml``.
+
+    Returns
+    -------
+    Dict[str, Any]
+        The full schema dictionary loaded from
+        ``<project_root>/config/schema.yaml``.  Returns ``{}`` if the file
+        was not found or could not be parsed.
+    """
+    return _SCHEMA
 
 
 ##============================

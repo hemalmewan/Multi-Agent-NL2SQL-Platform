@@ -61,6 +61,7 @@ _SQL_GENERATOR_PROMPT="""
      - Use aggregations functions when required (SUM,COUNT,AVG etc)
      - Apply LIMIT when the query asks for top results
      - Use clear aliases where needed
+     - For text-based filters (e.g., names, departments, cities, status, gender), use case-insensitive matching with LOWER()
 
     User Query:
     {user_prompt}

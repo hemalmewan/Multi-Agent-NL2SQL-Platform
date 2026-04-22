@@ -38,6 +38,7 @@ Dependencies
 from typing import Dict,Any,Optional
 from loguru import logger
 import time
+import json
 
 ##===================================
 ## Import User Define Python Modules
@@ -144,10 +145,12 @@ class RouterIntent:
                 logger.error("Invalid response from LLM", response_type=type(response).__name__)
                 raise TypeError("LLM response must be a dictionary")
 
-            intent = (response.get("response.label") or "").strip()
+
+            intent =response.get("response")
+            intent = json.loads(intent)
 
             return {
-                "intent": intent,
+                "intent": intent.get("label"),
                 "latency_ms": response.get("latency_ms",0),
                 "total_tokens": response.get("total_tokens",0),
                 "token_cost": response.get("token_cost",0),

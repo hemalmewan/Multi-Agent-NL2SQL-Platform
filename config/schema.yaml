@@ -1,43 +1,286 @@
+# ==============================================================================
+# schema.yaml
+# ==============================================================================
+# Purpose
+# -------
+# Defines the database schema metadata used by the NL2SQL pipeline to translate
+# natural language queries into executable PostgreSQL statements.
+#
+# This file is the single source of truth for table structure and foreign-key
+# relationships. It is loaded at runtime by `src/infrastructure/config.py`
+# (_get_schema) and consumed by the SQLGenerator agent to:
+#   1. Match user query intent to relevant tables via keyword lists.
+#   2. Provide column context so the LLM can write syntactically correct SQL.
+#   3. Supply join conditions between tables so multi-table queries are accurate.
+#
+# Domain
+# ------
+# Hospital management system with 12 tables covering the full patient journey:
+# registration → appointment → admission → diagnosis → lab/prescription →
+# billing → payment, supported by doctors, specialties, departments, and staff.
+#
+# ------------------------------------------------------------------------------
+# File Structure
+# ------------------------------------------------------------------------------
+# The file has two top-level keys:
+#
+#   tables:
+#     <table_name>:
+#       keywords:     List of natural language terms that map to this table.
+#                     Used by SQLGenerator._get_relevent_tables() for intent
+#                     matching (case-insensitive substring search).
+#       column_names: Ordered list of all column names in the table.
+#                     Passed verbatim into the LLM prompt as schema context.
+#
+#   relationships:
+#     - from: <table>.<column>   Source side of a foreign-key constraint.
+#       to:   <table>.<column>   Referenced side of the constraint.
+#     ...
+#     Used by SQLGenerator._build_schema_context() to inject JOIN hints for
+#     any pair of selected tables that share a relationship.
+#
+# ------------------------------------------------------------------------------
+# Tables Overview
+# ------------------------------------------------------------------------------
+#
+#  Table              | Primary Key       | Description
+#  -------------------|-------------------|--------------------------------------
+#  patients           | patient_id        | Core patient demographics and contact
+#                     |                   | details; the hub most other tables
+#                     |                   | reference via patient_id.
+#  doctors            | doctor_id         | Medical staff with specialty and
+#                     |                   | department assignments, licence info.
+#  specialties        | specialty_id      | Medical specialty lookup table
+#                     |                   | (e.g. Cardiology, Neurology).
+#  departments        | department_id     | Hospital wards/units with location
+#                     |                   | and head-of-department details.
+#  staff              | staff_id          | Non-doctor hospital employees
+#                     |                   | (nurses, admin, technicians, etc.).
+#  appointments       | appointment_id    | Scheduled outpatient visits linking
+#                     |                   | a patient to a doctor.
+#  admissions         | admission_id      | Inpatient hospitalization records
+#                     |                   | with room, bed, and status tracking.
+#  diagnoses          | diagnosis_id      | Clinical diagnoses per admission,
+#                     |                   | including ICD-style codes and severity.
+#  lab_orders         | lab_order_id      | Laboratory test orders and results
+#                     |                   | tied to a patient and appointment.
+#  prescriptions      | prescription_id   | Medication prescriptions issued
+#                     |                   | during an appointment.
+#  billing_invoices   | invoice_id        | Financial invoices per admission with
+#                     |                   | amount, discount, tax, and due date.
+#  payments           | payment_id        | Payment transactions against invoices,
+#                     |                   | including method and reference info.
+#
+# ------------------------------------------------------------------------------
+# Relationships Overview
+# ------------------------------------------------------------------------------
+# All foreign-key links expressed as from → to pairs:
+#
+#   doctors.specialty_id         → specialties.specialty_id
+#   doctors.department_id        → departments.department_id
+#   staff.department_id          → departments.department_id
+#   appointments.patient_id      → patients.patient_id
+#   appointments.doctor_id       → doctors.doctor_id
+#   admissions.patient_id        → patients.patient_id
+#   admissions.doctor_id         → doctors.doctor_id
+#   admissions.department_id     → departments.department_id
+#   diagnoses.patient_id         → patients.patient_id
+#   diagnoses.doctor_id          → doctors.doctor_id
+#   diagnoses.admission_id       → admissions.admission_id
+#   lab_orders.patient_id        → patients.patient_id
+#   lab_orders.doctor_id         → doctors.doctor_id
+#   lab_orders.appointment_id    → appointments.appointment_id
+#   prescriptions.patient_id     → patients.patient_id
+#   prescriptions.doctor_id      → doctors.doctor_id
+#   prescriptions.appointment_id → appointments.appointment_id
+#   billing_invoices.patient_id  → patients.patient_id
+#   billing_invoices.admission_id→ admissions.admission_id
+#   payments.patient_id          → patients.patient_id
+#   payments.invoice_id          → billing_invoices.invoice_id
+#
+# ------------------------------------------------------------------------------
+# How to Extend This Schema
+# ------------------------------------------------------------------------------
+# Adding a new table:
+#   1. Add an entry under `tables:` with a unique table name.
+#   2. Populate `keywords` with all natural language synonyms a user might say.
+#   3. List every column in `column_names` (order does not affect functionality).
+#
+# Adding a new relationship:
+#   1. Append a `- from: / to:` block under `relationships:`.
+#   2. Use the format `<table_name>.<column_name>` on both sides.
+#   3. Ensure both tables are already defined under `tables:`.
+#
+# Removing / renaming a table or column:
+#   - Update column_names and any relationship entries that reference the old name.
+#   - Search for the name in keyword lists of other tables to avoid stale matches.
+# ==============================================================================
+
 tables:
   patients:
-    keywords: ["patient", "patients", "person", "individual", "age", "gender"]
+    keywords: [ "patient", "patients", "person", "individual", "age", "gender" ]
+    column_names:
+      [
+        patient_id,
+        first_name,
+        last_name,
+        date_of_birth,
+        gender,
+        email,
+        phone,
+        address,
+        city,
+        blood_type,
+        emergency_contact_name,
+        emergency_contact_phone,
+        registerd_date,
+      ]
 
   doctors:
-    keywords: ["doctor", "doctors", "physician", "consultant", "medical staff"]
+    keywords: [ "doctor", "doctors", "physician", "consultant", "medical staff" ]
+    column_names:
+      [
+        doctor_id,
+        first_name,
+        last_name,
+        specialty_id,
+        department_id,
+        phone,
+        email,
+        hire_date,
+        license_number,
+        is_active,
+      ]
 
   specialties:
-    keywords: ["specialty", "specialties", "field", "expertise", "discipline"]
+    keywords: [ "specialty", "specialties", "field", "expertise", "discipline" ]
+    column_names: [ specialty_id, specialty_name, description ]
 
   admissions:
-    keywords:
-      ["admission", "admissions", "hospitalization", "inpatient", "admit"]
+    keywords: [ "admission", "admissions", "hospitalization", "inpatient", "admit" ]
+    column_names:
+      [
+        admission_id,
+        patient_id,
+        doctor_id,
+        department_id,
+        admission_date,
+        discharge_date,
+        room_number,
+        bed_number,
+        admission_type,
+        status,
+      ]
 
   appointments:
-    keywords:
-      ["appointment", "appointments", "booking", "schedule", "visit time"]
+    keywords: [ "appointment", "appointments", "booking", "schedule", "visit time" ]
+    column_names:
+      [
+        appointment_id,
+        patient_id,
+        doctor_id,
+        appointment_date,
+        appointment_time,
+        reason,
+        status,
+        created_at,
+      ]
 
   diagnoses:
-    keywords: ["diagnosis", "diagnoses", "disease", "condition", "illness"]
+    keywords: [ "diagnosis", "diagnoses", "disease", "condition", "illness" ]
+    column_names:
+      [
+        diagnosis_id,
+        admission_id,
+        patient_id,
+        doctor_id,
+        diagnosis_date,
+        diagnosis_code,
+        diagnosis_description,
+        severity,
+      ]
 
   lab_orders:
-    keywords: ["lab", "test", "lab test", "lab order", "medical test", "report"]
+    keywords: [ "lab", "test", "lab test", "lab order", "medical test", "report" ]
+    column_names:
+      [
+        lab_order_id,
+        patient_id,
+        doctor_id,
+        appointment_id,
+        test_name,
+        test_category,
+        order_date,
+        result_date,
+        result_value,
+        result_status,
+        notes,
+      ]
 
   prescriptions:
-    keywords:
-      ["prescription", "prescriptions", "medicine", "drug", "medication"]
+    keywords: [ "prescription", "prescriptions", "medicine", "drug", "medication" ]
+    column_names:
+      [
+        prescription_id,
+        patient_id,
+        doctor_id,
+        appointment_id,
+        medication_name,
+        dosage,
+        frequency,
+        duration_days,
+        prescribed_date,
+        notes,
+      ]
 
   billing_invoices:
-    keywords: ["invoice", "billing", "bill", "charges", "invoice amount"]
+    keywords: [ "invoice", "billing", "bill", "charges", "invoice amount" ]
+    column_names:
+      [
+        invoice_id,
+        patient_id,
+        admission_id,
+        invoice_date,
+        total_amount,
+        discount,
+        tax,
+        net_amount,
+        status,
+        due_date,
+      ]
 
   payments:
-    keywords:
-      ["payment", "payments", "revenue", "income", "amount", "transaction"]
+    keywords: [ "payment", "payments", "revenue", "income", "amount", "transaction" ]
+    column_names:
+      [
+        payment_id,
+        invoice_id,
+        patient_id,
+        payment_date,
+        amount,
+        payment_method,
+        transaction_reference,
+        status,
+      ]
 
   departments:
-    keywords: ["department", "departments", "unit", "ward", "division"]
+    keywords: [ "department", "departments", "unit", "ward", "division" ]
+    column_names: [ department_id, department_name, location, phone, head_of_department ]
 
   staff:
-    keywords: ["staff", "employee", "workers", "hospital staff", "personnel"]
+    keywords: [ "staff", "employee", "workers", "hospital staff", "personnel" ]
+    column_names:
+      [
+        staff_id,
+        first_name,
+        last_name,
+        role,
+        department_id,
+        hire_date,
+        phone,
+        email,
+        is_active,
+      ]
 
 relationships:
   - from: doctors.specialty_id

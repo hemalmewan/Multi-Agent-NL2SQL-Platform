@@ -461,6 +461,7 @@ def dump() -> None:
     print(f"   Model Tier: {_TIER}")
     print(f"   Openrouter Base URL: {_OPENROUTER_BASE_URL}")
     print(f"   Chat Model: {_CHAT_MODEL}")
+    print("=" * 60,"\n")
 
 ##======================
 ## Get config file

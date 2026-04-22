@@ -11,12 +11,13 @@ Pipeline overview
 1. Validate the incoming ``user_query`` and ``schema``.
 2. Identify relevant database tables by matching schema keywords against
    the query text (:meth:`~SQLGenerator._get_relevent_tables`).
-3. Resolve foreign-key join conditions between the selected tables
-   (:meth:`~SQLGenerator._get_relevent_relationships`).
+3. Build a filtered schema context — tables with their columns and any
+   foreign-key relationships between the selected tables
+   (:meth:`~SQLGenerator._build_schema_context`).
 4. Format the filtered schema context into ``_SQL_GENERATOR_PROMPT`` and
    send it to the LLM.
 5. Strip Markdown code fences from the response and return the clean SQL
-   together with token-usage and latency metadata.
+   together with the original query, token-usage, and latency metadata.
 
 Dependencies
 ------------
@@ -54,6 +55,7 @@ import time
 ##===================================
 from src.infrastructure.config import _get_schema
 from src.agents.prompts._SQL_GENERATOR_PROMPT import _SQL_GENERATOR_PROMPT
+from src.agents.prompts._QUERY_AMBIGUITY_CHECK import _QUERY_AMBIGUITY_CHECK_PROMPT
 
 ##===================================
 ## SQL Generator Agent
@@ -93,7 +95,7 @@ class SQLGenerator:
     def generate_sql(
         self,
         user_query:str,
-        schema:Optional[Dict[str,Any]]
+        schema:Optional[Dict[str,Any]]=None
     )->Dict[str,Any]:
         """
         Translate a natural language query into a SQL statement.
@@ -122,6 +124,8 @@ class SQLGenerator:
             Dict[str, Any]: A dictionary with the following keys:
                 - ``"SQL query"`` (str): The generated SQL statement, stripped of
                   Markdown code fences.
+                - ``"User Query"`` (str): The original natural language query passed
+                  by the caller, echoed back for traceability.
                 - ``"latency_ms"`` (float | int): Time taken by the LLM to respond,
                   in milliseconds.
                 - ``"token_cost"`` (float | int): Estimated cost in tokens or currency
@@ -156,11 +160,46 @@ class SQLGenerator:
                 raise TypeError("Schema must be a dictionary")
 
             relevant_tables=self._get_relevent_tables(schema,user_query)
-            relevant_relationships=self._get_relevent_relationships(schema,relevant_tables)
+            schema_context=self._build_schema_context(schema,relevant_tables)
+
+            if not schema_context["relationships"] and not schema_context["tables"]:
+
+                logger.warning(
+                    "No tables found for the given query",
+                    user_query=user_query
+                )
+                return {
+                    "sql_query":"",
+                    "message":"Unable to identify relevant data for your request. Please refine your query.",
+                    "status":"failed",
+                    "user_query":user_query,
+                    "latency_ms":0,
+                    "token_cost":0,
+                    "total_tokens":0
+                }
+            
+            if not schema_context["relationships"] and  len(schema_context["tables"])>1:
+
+                logger.warning(
+                        "Multiple tables found but no relationships",
+                        query=user_query,
+                        tables=relevant_tables
+                    )
+
+                return {
+                    "sql_query":"",
+                    "message":"The requested data spans multiple entities, but no valid relationships were found between them.",
+                    "status":"failed",
+                    "relevant_tables":relevant_tables,
+                    "user_query":user_query,
+                    "latency_ms":0,
+                    "token_cost":0,
+                    "total_tokens":0
+                }
 
             prompt=_SQL_GENERATOR_PROMPT.format(
-                relevant_tables=", ".join(relevant_relationships["tables"]),
-                relevant_relationships="\n".join(relevant_relationships["relationships"]),
+                relevant_tables=schema_context["tables"],
+                relevant_relationships=schema_context["relationships"],
                 user_prompt=user_query
             )
 
@@ -174,7 +213,9 @@ class SQLGenerator:
             sql_query=sql_query.replace("```sql"," ").replace("```"," ").strip()
 
             return {
-                "SQL query":sql_query,
+                "sql_query":sql_query,
+                "user_query":user_query,
+                "relevant_tables":relevant_tables,
                 "latency_ms":response.get("latency_ms",0),
                 "token_cost":response.get("token_cost",0),
                 "total_tokens":response.get("total_tokens",0)
@@ -249,102 +290,306 @@ class SQLGenerator:
         except Exception as e:
             logger.exception("Failed to extract relevant tables", error=str(e))
             raise
-
-    def _get_relevent_relationships(
+    
+    def _build_schema_context(
         self,
-        schema:Dict[str,Any],
-        selected_tables:List[str]
-    )-> Dict[str,List[str]]:
+        schema: Dict[str, Any],
+        selected_tables: List[str]
+    ) -> Dict[str, Any]:
         """
-        Resolve foreign-key relationships between a set of selected tables.
+        Build a filtered schema context from the selected tables and their relationships.
 
-        Scans the ``"relationships"`` list in the schema and retains only those
-        join conditions where *both* the source and target tables are already in
-        the selected set. Each qualifying relationship is expressed as a string
-        ``"table_a.col = table_b.col"`` suitable for use in a SQL ``JOIN … ON``
-        clause. The method also ensures both table names are present in the
-        returned tables list (they should be, but the set union makes this
-        explicit).
+        Starting from ``selected_tables``, the method scans every relationship in the
+        schema and collects join conditions where both the source and target table are
+        in the selected set.  It then assembles a column listing for each included
+        table, producing a compact context dict that can be embedded directly into the
+        LLM prompt.
 
         Args:
-            schema (Dict[str, Any]): The full database schema dictionary. Must contain
-                a ``"relationships"`` key with a list of relationship dicts. Each dict
-                should have:
-                    - ``"from"`` (str): Source column in ``"table.column"`` format.
-                    - ``"to"`` (str): Target column in ``"table.column"`` format.
-            selected_tables (List[str]): Table names previously identified as relevant
-                to the user query (typically the output of :meth:`_get_relevent_tables`).
+            schema (Dict[str, Any]): The full database schema dictionary. Expected keys:
+                - ``"tables"`` (dict): Maps table names to their metadata, where each
+                  entry may include a ``"column_names"`` list of column name strings.
+                - ``"relationships"`` (list): List of relationship dicts, each with
+                  ``"from"`` and ``"to"`` keys in ``"table.column"`` format.
+            selected_tables (List[str]): Table names pre-selected by
+                :meth:`_get_relevent_tables` whose columns should appear in the context.
 
         Returns:
-            Dict[str, List[str]]: A dictionary with two keys:
-                - ``"tables"`` (List[str]): Deduplicated list of table names involved
-                  in at least one relevant relationship, merged with the input
-                  ``selected_tables``.
-                - ``"relationships"`` (List[str]): List of join condition strings in
-                  the form ``"table_a.col = table_b.col"``.
-
-        Raises:
-            Exception: Re-raises any unexpected error (e.g. missing ``"relationships"``
-                       key) after logging it.
+            Dict[str, Any]: A dictionary with two keys:
+                - ``"tables"`` (list[dict]): Each entry has the form
+                  ``{"table": <name>, "columns": [<col>, ...]}``, one per selected table
+                  that exists in the schema.
+                - ``"relationships"`` (list[str]): Join conditions between selected
+                  tables, formatted as ``"<from_col> = <to_col>"``.
 
         Example:
             >>> schema = {
-            ...     "tables": {...},
+            ...     "tables": {
+            ...         "orders": {"column_names": ["id", "customer_id", "total"]},
+            ...         "customers": {"column_names": ["id", "name"]},
+            ...     },
             ...     "relationships": [
-            ...         {"from": "orders.customer_id", "to": "customers.id"},
-            ...         {"from": "products.category_id", "to": "categories.id"},
+            ...         {"from": "orders.customer_id", "to": "customers.id"}
             ...     ]
             ... }
-            >>> agent._get_relevent_relationships(schema, ["orders", "customers"])
+            >>> agent._build_schema_context(schema, ["orders", "customers"])
             {
-                "tables": ["orders", "customers"],
-                "relationships": ["orders.customer_id = customers.id"]
+                "tables": [
+                    {"table": "orders", "columns": ["id", "customer_id", "total"]},
+                    {"table": "customers", "columns": ["id", "name"]}
+                ],
+                "relationships": ["customer_id = id"]
             }
         """
 
+        expanded_tables = set(selected_tables)
+        relationships = set()    
+
+        for rel in schema.get("relationships", []):
+            from_field = rel.get("from")
+            to_field = rel.get("to")
+
+            if not from_field and not to_field:
+                continue
+
+            from_table = from_field.split(".")[0]
+            to_table = to_field.split(".")[0]
+
+            if (from_table in expanded_tables) and (to_table in expanded_tables):
+                expanded_tables.add(from_table)
+                expanded_tables.add(to_table)
+                relationships.add(f"{from_field.split('.')[1]} = {to_field.split('.')[1]}")
+        
+        tables_context = []
+
+        for table in expanded_tables:
+            if table not in schema.get("tables", {}):
+                continue
+            table_data = schema.get("tables", {}).get(table, {})
+            columns = table_data.get("column_names", [])
+
+            tables_context.append({
+                "table": table,
+                "columns": columns
+            })
+
+        return {
+            "tables": tables_context,
+            "relationships": list(relationships)
+        }
+    
+    def _check_ambiguity(self, user_query: str) -> bool:
+        """
+        Determine whether a natural language query is clear and unambiguous.
+
+        Sends the query to the LLM using the ambiguity-check system prompt
+        (``_QUERY_AMBIGUITY_CHECK_PROMPT``) and interprets the response as a
+        boolean signal:
+
+        - ``"FALSE"`` — the query is clear and can proceed to SQL generation.
+        - ``"TRUE"``  — the query is ambiguous or invalid and should be rejected.
+
+        Any unexpected response or exception is treated as clear (returns
+        ``False``) to fail safely.
+
+        Args:
+            user_query (str): The natural language query to evaluate.
+
+        Returns:
+            bool: ``False`` if the query is deemed clear and unambiguous by the
+                  LLM; ``True`` otherwise (ambiguous, invalid, or on error).
+
+        Example:
+            >>> _check_ambiguity("List all patients admitted in January 2024")
+            False
+            >>> _check_ambiguity("show me the thing")
+            True
+        """
+        logger.info("Starting ambiguity check", query=user_query)
+
+        prompt = f"User Query: {user_query}"
+
         try:
+            response = self.llm_call.generate(
+                user_prompt=prompt,
+                system_prompt=_QUERY_AMBIGUITY_CHECK_PROMPT
+            )
 
-            selected_relationships=set()
-            selected_tables_set=set(selected_tables)
+            if not isinstance(response, dict):
+                logger.error(
+                    "Invalid LLM response format",
+                    response_type=type(response).__name__
+                )
+                return False
 
-            for rel in schema["relationships"]:
-                if not isinstance(rel, dict):
+            response_text = response.get("response", "").strip().upper()
+
+            logger.debug(
+                "Ambiguity raw response",
+                query=user_query,
+                response=response_text,
+                latency_ms=response.get("latency_ms", 0),
+                token_cost=response.get("token_cost", 0),
+                total_tokens=response.get("total_tokens", 0)
+            )
+
+            if response_text == "FALSE":
+                logger.info("Query classified as CLEAR", query=user_query)
+                return False
+
+            elif response_text == "TRUE":
+                logger.warning("Query classified as AMBIGUOUS/INVALID", query=user_query)
+                return True
+
+            else:
+                logger.error(
+                    "Unexpected ambiguity response",
+                    query=user_query,
+                    response=response_text
+                )
+                return False
+
+        except Exception as e:
+            logger.exception(
+                "Ambiguity check failed",
+                query=user_query,
+                error=str(e)
+            )
+            return False
+    
+    def refine_query(
+        self,
+        user_query:str,
+        max_iterations:int=3
+    )-> Dict[str,Any]:
+        """
+        Interactively refine an ambiguous query until it is clear or retries are exhausted.
+
+        Prompts the user (via ``input()``) for additional detail on each iteration,
+        merges the original query with the new detail through the LLM, and then
+        runs :meth:`_check_ambiguity` on the result.  The loop exits as soon as the
+        LLM classifies the refined query as unambiguous, or after ``max_iterations``
+        attempts — whichever comes first.
+
+        Args:
+            user_query (str): The initial natural language query that may be ambiguous
+                              or under-specified.  Must be a non-empty string.
+            max_iterations (int): Maximum number of clarification rounds to attempt
+                                  before giving up.  Defaults to ``3``.
+
+        Returns:
+            Dict[str, Any]: A dictionary with the following keys:
+
+            On success (query resolved as unambiguous):
+                - ``"status"`` (str): ``"refined"``
+                - ``"query"`` (str): The final, clarified natural language query.
+                - ``"iterations"`` (int): The refinement round on which success occurred.
+                - ``"latency_ms"`` (float | int): LLM latency for the last refinement call.
+                - ``"token_cost"`` (float | int): Token cost for the last refinement call.
+                - ``"total_tokens"`` (int): Total tokens consumed by the last refinement call.
+
+            On failure (max iterations reached):
+                - ``"status"`` (str): ``"failed"``
+                - ``"message"`` (str): Human-readable explanation.
+                - ``"latency_ms"`` (float | int): LLM latency for the final call.
+                - ``"token_cost"`` (float | int): Token cost for the final call.
+                - ``"total_tokens"`` (int): Total tokens consumed by the final call.
+
+        Raises:
+            ValueError: If ``user_query`` is not a non-empty string, if any
+                        ``query_detail`` input is empty, or if an unexpected error
+                        occurs during refinement (wraps the underlying exception).
+
+        Example:
+            >>> # Simulated interactive session — user types "doctors with most admissions"
+            >>> result = agent.refine_query("show me the thing", max_iterations=2)
+            Iteration 1: Please provide the query in more specific details: doctors with most admissions
+            >>> result["status"]
+            'refined'
+            >>> result["query"]
+            'List the top doctors ranked by total number of patient admissions.'
+        """
+
+        if not isinstance(user_query, str) or not user_query.strip():
+            logger.error("Invalid user_query", value=user_query)
+            raise ValueError("user query must be a non-empty string")
+        
+        try:
+            current_query=user_query
+
+            for iteration in range(1,max_iterations+1):
+
+                logger.info(f"Refinement iteration {iteration}", query=current_query)
+
+                query_detail = input(f"Iteration {iteration}: Please provide the query in more specific details: ")
+                
+                if not isinstance(query_detail, str) or not query_detail.strip():
+                    logger.error("Invalid query_detail", value=query_detail)
+                    raise ValueError("query_detail must be a non-empty string")
+                
+                ## prompt construction
+                refine_prompt=f"""
+                 Original Query: {current_query}
+                 Additional Details: {query_detail}
+
+                 Refine the user query into a clear and complete refine user query.
+                """
+                
+                llm_refine_query = self.llm_call.generate(
+                    user_prompt=refine_prompt,
+                    system_prompt="You are a query refinement agent. Your task is to refine the original user query based on the provided additional query detail.",
+                )
+                
+                refined_query = llm_refine_query.get("response", "").strip()
+
+                logger.debug("Refine user query", refined_query=refined_query)
+                is_ambiguous = self._check_ambiguity(refined_query)
+
+                if is_ambiguous:
+                    logger.warning("Refined query is ambiguous, continuing refinement", query=refined_query)
+                    current_query = refined_query
                     continue
-
-                from_field = rel.get("from")
-                to_field = rel.get("to")
-
-                if not from_field or not to_field:
-                    continue
-
-                from_table=from_field.split(".")[0]
-                to_table=to_field.split(".")[0]
-
-                if from_table in selected_tables_set and to_table in selected_tables_set:
-                    selected_tables_set.add(from_table)
-                    selected_tables_set.add(to_table)
-                    selected_relationships.add(f"{from_field} = {to_field}")
+                
+               
+                logger.info("Query refinement completed successfully", query=refined_query)
+                return {
+                    "status": "refined",
+                    "query": refined_query,
+                    "iterations":iteration,
+                    "latency_ms":llm_refine_query.get("latency_ms", 0),
+                    "token_cost":llm_refine_query.get("token_cost", 0),
+                    "total_tokens":llm_refine_query.get("total_tokens", 0),
+                }
+                break
             
+            # after max attempts
+            logger.warning("Max refinement attempts reached", query=current_query)
+
             return {
-                "relationships":list(selected_relationships),
-                "tables":list(selected_tables_set)
+            "status": "failed",
+            "message": "Unable to refine query after multiple attempts",
+            "latency_ms":llm_refine_query.get("latency_ms", 0),
+            "token_cost":llm_refine_query.get("token_cost", 0),
+            "total_tokens":llm_refine_query.get("total_tokens", 0),
             }
+            
         
         except Exception as e:
-            logger.exception("Failed to extract relationships", error=str(e))
-            raise
-
-
+            logger.exception(
+                "Query refinement failed",
+                query=user_query,
+                error=str(e)
+            )
+            raise ValueError("Query refinement failed")
             
-
-
-        
-
-
-
-
+            
+            
+    
 
         
+
+
+
 
         
 

@@ -76,7 +76,7 @@ from src.infrastructure.config import(
     _MAX_TOKENS,
     _TEMPERATURE,
     _PROVIDER,
-    _BASE_URL,
+    _OPENROUTER_BASE_URL,
     TokenCounter
 )
 
@@ -191,7 +191,7 @@ class OpenRouterProvider(LLMProvider):
         self.model=model or _get_chat_model
         self.temperature=temperature or _TEMPERATURE
         self.max_tokens=max_tokens or _MAX_TOKENS
-        self.base_url=base_url or _BASE_URL
+        self.base_url=base_url or _OPENROUTER_BASE_URL
         self.api_key=_get_api_key(_PROVIDER)
         self.openai_client=OpenAI(
             api_key=self.api_key,
@@ -500,7 +500,7 @@ class DummyProvider(LLMProvider):
 ##==============================
 ## LLM Service Provider Factory
 ##==============================
-def _llm_service_provider(self,config:Optional[Dict[str,Any]]=None)-> LLMProvider:
+def _llm_service_provider(config:Optional[Dict[str,Any]]=None)-> LLMProvider:
     """Instantiate and return the appropriate ``LLMProvider`` from configuration.
 
     Reads the active application configuration (or uses the supplied
@@ -547,7 +547,7 @@ def _llm_service_provider(self,config:Optional[Dict[str,Any]]=None)-> LLMProvide
         logger.error("Invalid config: expected dict", received_type=type(config).__name__)
         raise TypeError("Config must be a dictionary")
 
-    provider_name=config.get("provider.default")
+    provider_name=(config.get("provider")).get("default")
 
     if not provider_name:
         logger.error("Missing 'provider.default' in config")
@@ -557,15 +557,15 @@ def _llm_service_provider(self,config:Optional[Dict[str,Any]]=None)-> LLMProvide
         if provider_name=="openrouter":
             return OpenRouterProvider(
                 model=_get_chat_model(provider_name),
-                temperature=config.get("llm.temperature"),
-                max_tokens=config.get("llm.max_tokens"),
-                base_url=config.get("provider.openrouter_base_url")
+                temperature=config.get("llm").get("temperature"),
+                max_tokens=config.get("llm").get("max_tokens"),
+                base_url=config.get("provider").get("openrouter_base_url")
             )
         elif provider_name=="openai":
             return OpenAIProvider(
                 model=_get_chat_model(provider_name),
-                temperature=config.get("llm.temperature"),
-                max_tokens=config.get("llm.max_tokens")
+                temperature=config.get("llm").get("temperature"),
+                max_tokens=config.get("llm").get("max_tokens")
             )
         else:
             logger.warning(

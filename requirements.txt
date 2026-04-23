@@ -1,3 +1,23 @@
+# requirements.txt
+# Python package dependencies for the AI Engineering Bootcamp mini-project-04.
+#
+# Core packages:
+#   - openai, langchain-openai: OpenAI API client and LangChain integration
+#   - langchain, langchain-core: LangChain framework and core abstractions
+#   - langchain-anthropic: LangChain integration for Anthropic (Claude) models
+#   - langchain-google-genai: LangChain integration for Google Generative AI
+#   - langchain-groq: LangChain integration for Groq inference
+#   - langchain-community: Community-maintained LangChain integrations
+#   - langfuse: LLM observability and tracing
+#   - loguru: Simplified Python logging
+#   - pyyaml: YAML parsing and serialization
+#   - python-dotenv / dotenv: Load environment variables from .env files
+#   - supabase: Supabase client for database and auth
+#   - tiktoken: Fast BPE tokenizer used by OpenAI models
+#   - ipykernel: IPython kernel for Jupyter notebook support
+#
+# Install with: pip install -r requirements.txt
+
 openai
 langchain
 langfuse
@@ -7,6 +27,8 @@ dotenv
 python-dotenv
 langchain-core
 supabase
+pgvector
+sqlalchemy
 tiktoken
 ipykernel
 langchain-openai
@@ -14,3 +36,4 @@ langchain-anthropic
 langchain-google-genai
 langchain-groq
 langchain-community
+psycopg2-binary

@@ -54,6 +54,8 @@ import time
 ##===================================
 from src.agents.intent_router import RouterIntent
 from src.agents.sql_generator import SQLGenerator
+from src.infrastructure.guardrails.guardrails import SQLGuardRails
+from src.infrastructure.db.supabase_client import _execute_sql_query
 #from src.agents.result_interpreter import ResultInterpreter
 
 ##===================================
@@ -102,6 +104,7 @@ class Orchestrator:
         """
         self.router=RouterIntent(llm=llm)
         self.sql_generator=SQLGenerator(llm=llm)
+        self.guardrails=SQLGuardRails(llm=llm)
         #self.result_interpreter=ResultInterpreter(llm=llm)
     
     def agent_orchestrator(
@@ -178,6 +181,8 @@ class Orchestrator:
             'ignored'
         """
 
+        
+
         ## token counter and token cost
         total_tokens=0
         total_token_cost=0
@@ -218,7 +223,58 @@ class Orchestrator:
 
                     if not sql_query_result["sql_query"]:
                         logger.warning("SQL query is not generated.Please check you prompt or schema")
+                    
+                    else:
+                        ## add token count and cost 
+                        total_tokens+=sql_query_result['total_tokens']
+                        total_token_cost+=sql_query_result['token_cost']
 
+                        ## SQL generator call completed
+                        logger.info("SQL generator agent is completed")
+
+                        ## print SQL query
+                        logger.info(f"Generated SQL query: {sql_query_result['sql_query']}")
+                        ## print User query
+                        logger.info(f"User query: {user_query}")
+
+                        ## check if sql query is safe using guardrails
+                        is_safe=self.guardrails.is_validate(sql_query=sql_query_result['sql_query'])
+
+                        if is_safe:
+                            logger.info("SQL query is safe and valid")
+
+                             ## execute sql auery using supabase
+                            sql_exe_result=_execute_sql_query(sql_query=sql_query_result['sql_query'])
+                
+                        end_time=time.time()
+
+                        latency_ms=int((end_time-start_time)*1000)
+
+                        logger.info(f"Latency: {latency_ms}ms")
+                        logger.info(f"Total Tokens: {total_tokens}")
+                        logger.info(f"Total Token Cost: ${total_token_cost:.6f}")
+
+                        return {
+                            "sql_query":sql_query_result['sql_query'],
+                            "message":"SQL query generated successfully",
+                            "status":"success",
+                            "latency_ms":latency_ms,
+                            "total_tokens":total_tokens,
+                            "token_cost":total_token_cost
+                        }
+
+                else:
+                    logger.warning("Query is not refined.Please Try Again Later!!!!!")
+                    
+
+            else:
+                ## SQL generator call
+                logger.info("SQL generator agent is called")
+                sql_query_result=self.sql_generator.generate_sql(user_query=user_query)
+
+                if not sql_query_result["sql_query"]:
+                    logger.warning("SQL query is not generated.Please check you prompt or schema")
+                else:
                     ## add token count and cost 
                     total_tokens+=sql_query_result['total_tokens']
                     total_token_cost+=sql_query_result['token_cost']
@@ -231,6 +287,15 @@ class Orchestrator:
                     ## print User query
                     logger.info(f"User query: {user_query}")
 
+                    ## check if sql query is safe using guardrails
+                    is_safe=self.guardrails.is_validate(sql_query=sql_query_result['sql_query'])
+
+                    if is_safe:
+                        logger.info("SQL query is safe and valid")
+
+                        ## execute sql auery using supabase
+                        sql_exe_result=_execute_sql_query(sql_query=sql_query_result['sql_query'])
+                    
                     end_time=time.time()
 
                     latency_ms=int((end_time-start_time)*1000)
@@ -247,47 +312,6 @@ class Orchestrator:
                         "total_tokens":total_tokens,
                         "token_cost":total_token_cost
                     }
-
-                else:
-                    logger.warning("Query is not refined.Please Try Again Later!!!!!")
-                    
-
-            else:
-                ## SQL generator call
-                logger.info("SQL generator agent is called")
-                sql_query_result=self.sql_generator.generate_sql(user_query=user_query)
-
-                if not sql_query_result["sql_query"]:
-                    logger.warning("SQL query is not generated.Please check you prompt or schema")
-
-                ## add token count and cost 
-                total_tokens+=sql_query_result['total_tokens']
-                total_token_cost+=sql_query_result['token_cost']
-
-                ## SQL generator call completed
-                logger.info("SQL generator agent is completed")
-
-                ## print SQL query
-                logger.info(f"Generated SQL query: {sql_query_result['sql_query']}")
-                ## print User query
-                logger.info(f"User query: {user_query}")
-
-                end_time=time.time()
-
-                latency_ms=int((end_time-start_time)*1000)
-
-                logger.info(f"Latency: {latency_ms}ms")
-                logger.info(f"Total Tokens: {total_tokens}")
-                logger.info(f"Total Token Cost: ${total_token_cost:.6f}")
-
-                return {
-                    "sql_query":sql_query_result['sql_query'],
-                    "message":"SQL query generated successfully",
-                    "status":"success",
-                    "latency_ms":latency_ms,
-                    "total_tokens":total_tokens,
-                    "token_cost":total_token_cost
-                }
 
         else:
             end_time=time.time()

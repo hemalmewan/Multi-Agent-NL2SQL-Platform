@@ -358,6 +358,7 @@ def _execute_sql_query(sql_query:str)->Dict[str,Any]:
             data=[dict(zip(columns,row)) for row in result.fetchall()]
 
         logger.info(f"✅ Query executed successfully: {len(data)} rows returned")
+        ##logger.info(f"Data: {data}")
         return {
             "status":"success",
             "data":data,

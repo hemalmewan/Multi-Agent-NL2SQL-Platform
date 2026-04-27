@@ -20,7 +20,7 @@
 
 openai
 langchain
-langfuse
+langfuse>=2.0.0  
 loguru
 pyyaml
 dotenv
@@ -37,3 +37,6 @@ langchain-google-genai
 langchain-groq
 langchain-community
 psycopg2-binary
+plotly
+pandas
+nbformat

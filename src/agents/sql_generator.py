@@ -378,7 +378,7 @@ class SQLGenerator:
             "relationships": list(relationships)
         }
     
-    def _check_ambiguity(self, user_query: str) -> bool:
+    def _check_ambiguity(self, user_query: str) -> Dict[str,Any]:
         """
         Determine whether a natural language query is clear and unambiguous.
 
@@ -435,11 +435,21 @@ class SQLGenerator:
 
             if response_text == "FALSE":
                 logger.info("Query classified as CLEAR", query=user_query)
-                return False
+                return {
+                    "status":False,
+                    "total_tokens":response.get("total_tokens",0),
+                    "token_cost":response.get("token_cost",0),
+                    "latency_ms":response.get("latency_ms",0)
+                }
 
             elif response_text == "TRUE":
                 logger.warning("Query classified as AMBIGUOUS/INVALID", query=user_query)
-                return True
+                return {
+                    "status":True,
+                    "total_tokens":response.get("total_tokens",0),
+                    "token_cost":response.get("token_cost",0),
+                    "latency_ms":response.get("latency_ms",0)
+                }
 
             else:
                 logger.error(
@@ -447,7 +457,12 @@ class SQLGenerator:
                     query=user_query,
                     response=response_text
                 )
-                return False
+                return {
+                    "status":False,
+                    "total_tokens":response.get("total_tokens",0),
+                    "token_cost":response.get("token_cost",0),
+                    "latency_ms":response.get("latency_ms",0)
+                }
 
         except Exception as e:
             logger.exception(
@@ -455,7 +470,12 @@ class SQLGenerator:
                 query=user_query,
                 error=str(e)
             )
-            return False
+            return {
+                "status":False,
+                "total_tokens":0,
+                "token_cost":0,
+                "latency_ms":0
+            }
     
     def refine_query(
         self,
@@ -545,7 +565,7 @@ class SQLGenerator:
                 logger.debug("Refine user query", refined_query=refined_query)
                 is_ambiguous = self._check_ambiguity(refined_query)
 
-                if is_ambiguous:
+                if is_ambiguous['status']:
                     logger.warning("Refined query is ambiguous, continuing refinement", query=refined_query)
                     current_query = refined_query
                     continue
@@ -567,6 +587,7 @@ class SQLGenerator:
 
             return {
             "status": "failed",
+            "iterations":max_iterations,
             "message": "Unable to refine query after multiple attempts",
             "latency_ms":llm_refine_query.get("latency_ms", 0),
             "token_cost":llm_refine_query.get("token_cost", 0),

@@ -39,6 +39,7 @@ from typing import Dict,Any,Optional
 from loguru import logger
 import time
 import json
+import re
 
 ##===================================
 ## Import User Define Python Modules
@@ -146,14 +147,26 @@ class RouterIntent:
                 raise TypeError("LLM response must be a dictionary")
 
 
-            intent =response.get("response")
-            intent = json.loads(intent)
+            raw = response.get("response", "") or ""
+
+            # Strip markdown code fences (```json ... ``` or ``` ... ```)
+            raw = re.sub(r"```(?:json)?\s*", "", raw).strip()
+
+            # If the LLM added surrounding text, extract the first {...} block
+            if not raw.startswith("{"):
+                match = re.search(r"\{[^}]+\}", raw)
+                raw = match.group() if match else raw
+
+            intent = json.loads(raw)
+
+            # Normalise to uppercase so "sql" / "SQL" / " SQL " all match
+            label = (intent.get("label") or "GENERAL").strip().upper()
 
             return {
-                "intent": intent.get("label"),
-                "latency_ms": response.get("latency_ms",0),
-                "total_tokens": response.get("total_tokens",0),
-                "token_cost": response.get("token_cost",0),
+                "intent": label,
+                "latency_ms": response.get("latency_ms", 0),
+                "total_tokens": response.get("total_tokens", 0),
+                "token_cost": response.get("token_cost", 0),
             }
 
         except Exception as e:

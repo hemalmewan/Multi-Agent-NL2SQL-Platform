@@ -40,3 +40,5 @@ psycopg2-binary
 plotly
 pandas
 nbformat
+fastapi 
+uvicorn

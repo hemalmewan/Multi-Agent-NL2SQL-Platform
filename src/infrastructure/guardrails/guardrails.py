@@ -225,7 +225,7 @@ class SQLGuardRails:
     ##===============================
     ## Guardrails Check Orchestrator
     ##================================
-    def is_validate(self, sql_query: str) -> bool:
+    def is_validate(self, sql_query: str) -> Dict[str, Any]:
         """
         Orchestrate the full guardrails pipeline for a SQL query.
 
@@ -247,40 +247,63 @@ class SQLGuardRails:
 
         Returns
         -------
-        bool
-            ``True`` if the query passes every guardrail and is safe to
-            forward to the database, ``False`` if it fails any check.
+        Dict[str, Any]
+            A dict with keys:
+              - ``"is_valid"`` (bool): ``True`` if safe to execute.
+              - ``"reason"`` (str | None): Human-readable rejection reason,
+                or ``None`` when the query is valid.
 
         Examples
         --------
         >>> guardrails = SQLGuardRails(llm=my_llm_client)
         >>> guardrails.is_validate("SELECT id, name FROM employees LIMIT 10")
-        True
+        {"is_valid": True, "reason": None}
         >>> guardrails.is_validate("DELETE FROM employees WHERE id = 5")
-        False
+        {"is_valid": False, "reason": "Prohibited SQL operation 'DELETE' detected..."}
         >>> guardrails.is_validate("")
-        False
+        {"is_valid": False, "reason": "Invalid SQL query input."}
         """
-        logger.info("Starting SQL Guardrails",query=sql_query)
+        logger.info("Starting SQL Guardrails", query=sql_query)
 
         if not sql_query or not isinstance(sql_query, str):
             logger.error("Invalid SQL query input")
-            return False
+            return {"is_valid": False, "reason": "Invalid SQL query input."}
 
         if self._is_prohibited(sql_query):
+            detected = next(
+                (k for k in self.prohibited_quries if k in sql_query.strip().upper()),
+                "prohibited keyword"
+            )
             logger.warning("SQL query is not safe. Rejecting the query from system")
-            return False
-        
-        elif self._is_select(sql_query):
-            if self._is_query_syntax_valid(sql_query):
-                logger.info("SQL query syntax varified.Processing for database execution")
-                return True
-            else:
-                logger.warning("SQL query syntax mismaching. Rejecting query from the system")
-                return False
-        
+            return {
+                "is_valid": False,
+                "reason": (
+                    f"Prohibited SQL operation '{detected}' detected. "
+                    "Only read-only SELECT queries are permitted in this system."
+                )
+            }
+
+        if not self._is_select(sql_query):
+            return {
+                "is_valid": False,
+                "reason": (
+                    "Only SELECT (read-only) queries are allowed. "
+                    "Queries that modify the database are not permitted."
+                )
+            }
+
+        if not self._is_query_syntax_valid(sql_query):
+            logger.warning("SQL query syntax mismatch. Rejecting query from the system")
+            return {
+                "is_valid": False,
+                "reason": (
+                    "The generated SQL query contains a syntax error "
+                    "and cannot be executed safely."
+                )
+            }
+
         logger.info("SQL query passed all guardrails")
-        return True
+        return {"is_valid": True, "reason": None}
 
 
         

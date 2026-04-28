@@ -45,6 +45,7 @@ Example
 ##===========================
 ## Import Required Libraries
 ##===========================
+from pandas.core.algorithms import mode
 from typing import Dict,Any,Optional
 from loguru import logger
 import time
@@ -210,127 +211,38 @@ class Orchestrator:
             total_token_cost+=is_ambiguous['token_cost']
             
             if is_ambiguous['status']:
-                
-                ## call query refinement 
-                refined_result=self._query_refinement(user_query=user_query)
+                # Query is ambiguous — return immediately so the frontend can
+                # show the refinement modal and let the user clarify.
+                end_time=time.time()
+                latency_ms=int((end_time-start_time)*1000)
 
-                ## add token count and cost
-                total_tokens+=refined_result['total_tokens']
-                total_token_cost+=refined_result['token_cost']
+                logger.info("Query is ambiguous, requesting clarification from user")
 
-                if refined_result["status"]=="refined":
-                    user_query=refined_result["query"]
-                
-                    logger.info("Refined user query",query=user_query)
-                    logger.info(f"Refinement iterations: {refined_result['iterations']}")
+                _update_current_observation(
+                    input=user_query,
+                    output="ambiguous",
+                    metadata={
+                        "stage":"ambiguity_check_stage",
+                        "token_cost":total_token_cost,
+                        "latency_ms":latency_ms,
+                    },
+                    model="gpt-4o-mini",
+                    usage={
+                        "input":0,
+                        "output":0,
+                        "total":total_tokens
+                    }
+                )
 
-                    ## call SQL generator agent
-                    sql_query_result=self._sql_generation_agent(user_query=user_query)
+                self._flush_observation()
 
-                    ## add token count and cost
-                    total_tokens+=sql_query_result['total_tokens']
-                    total_token_cost+=sql_query_result['token_cost']
-
-
-                    if not sql_query_result["sql_query"]:
-                        logger.warning("SQL query is not generated.Please check you prompt or schema")
-                    
-                    else:
-                        ## print SQL query
-                        logger.info(f"Generated SQL query: {sql_query_result['sql_query']}")
-                        ## print User query
-                        logger.info(f"User query: {user_query}")
-
-                        is_safe=self._guadrails_check(sql_query=sql_query_result['sql_query'])
-
-                        if is_safe:
-                            logger.info("SQL query is safe and valid")
-
-                            sql_exe_result=self._database_executor(sql_query=sql_query_result['sql_query'])
-
-                            ## generate a visualization using result interpreter
-                            visualization=self._visulization(
-                                user_query=user_query,
-                                sql_result=sql_exe_result['data']
-                            )
-
-                            ## update the observation with 
-                            _update_current_observation(
-                                input=user_query,
-                                output=visualization["type"],
-                                metadata={
-                                    "stage":"visualization_stage",
-                                    "latency_ms":visualization['latency_ms'],
-                                },
-                                model="gpt-4o-mini",
-                                usage={
-                                    "input":0,
-                                    "output":0,
-                                    "total":0
-                                }
-                            )
-
-                        end_time=time.time()
-                        latency_ms=int((end_time-start_time)*1000)
-
-                        logger.info(f"Latency: {latency_ms}ms")
-                        logger.info(f"Total Tokens: {total_tokens}")
-                        logger.info(f"Total Token Cost: ${total_token_cost:.6f}")
-
-                        ##update the observation with Latency,Total Tokens and Total Cost
-                        _update_current_observation(
-                            metadata={
-                                "token_cost":total_token_cost,
-                                "latency_ms":latency_ms,
-                            },
-                            model="gpt-4o-mini",
-                            usage={
-                                "input":0,
-                                "output":0,
-                                "total":total_tokens
-                            }
-                        )
-
-                        ## flush all 
-                        self._flush_observation()
-
-                        return {
-                            "sql_query":sql_query_result['sql_query'],
-                            "message":"SQL query generated successfully",
-                            "status":"success",
-                            "latency_ms":latency_ms,
-                            "total_tokens":total_tokens,
-                            "token_cost":total_token_cost
-                        }
-
-                else:
-                    logger.warning("Query is not refined.Please Try Again Later!!!!!")
-
-                    end_time=time.time()
-                    latency_ms=int((end_time-start_time)*1000)
-                     ##update the observation with Latency,Total Tokens and Total Cost
-                    _update_current_observation(
-                         metadata={
-                            "token_cost":total_token_cost,
-                            "latency_ms":latency_ms,
-                            },
-                        model="gpt-4o-mini",
-                        usage={
-                            "input":0,
-                            "output":0,
-                            "total":total_tokens
-                        }
-                    )
-                    ## flush all
-                    self._flush_observation()
-
-                    return {
-                        "status": "failed",
-                        "message": "Query refinement failed",
-                        "latency_ms": latency_ms,
-                        "total_tokens": total_tokens,
-                        "token_cost": total_token_cost
-                    }         
+                return {
+                    "status": "ambiguous",
+                    "message": "Your query needs a bit more detail. Please add specifics such as a time range, department, doctor name, or metric.",
+                    "latency_ms": latency_ms,
+                    "total_tokens": total_tokens,
+                    "token_cost": total_token_cost
+                }
 
             else:
                 ## sql generator agent
@@ -349,34 +261,31 @@ class Orchestrator:
                     logger.info(f"User query: {user_query}")
 
                     ## check if sql query is safe using guardrails
-                    is_safe=self._guadrails_check(sql_query=sql_query_result['sql_query'])
+                    guardrail_result=self._guadrails_check(sql_query=sql_query_result['sql_query'])
 
-                    if is_safe:
-                        logger.info("SQL query is safe and valid")
-                        sql_exe_result=self._database_executor(sql_query=sql_query_result['sql_query'])
+                    if not guardrail_result["is_valid"]:
+                        end_time=time.time()
+                        latency_ms=int((end_time-start_time)*1000)
+                        logger.warning("Query blocked by guardrails", reason=guardrail_result["reason"])
+                        self._flush_observation()
+                        return {
+                            "status": "guardrails_blocked",
+                            "message": guardrail_result["reason"],
+                            "sql_query": sql_query_result['sql_query'],
+                            "latency_ms": latency_ms,
+                            "total_tokens": total_tokens,
+                            "token_cost": total_token_cost
+                        }
 
-                        ## generate a visualization using result interpreter
-                        visualization=self._visulization(
-                            user_query=user_query,
-                            sql_result=sql_exe_result['data']
-                        )
+                    logger.info("SQL query is safe and valid")
+                    sql_exe_result=self._database_executor(sql_query=sql_query_result['sql_query'])
 
-                        ## update the observation with 
-                        _update_current_observation(
-                            input=user_query,
-                            output=visualization["type"],
-                            metadata={
-                                "stage":"visualization_stage",
-                                "latency_ms":visualization['latency_ms'],
-                            },
-                            model="gpt-4o-mini",
-                            usage={
-                                "input":0,
-                                "output":0,
-                                "total":0
-                            }
-                        )
-       
+                    ## generate a visualization using result interpreter
+                    self._visulization(
+                        user_query=user_query,
+                        sql_result=sql_exe_result['data']
+                    )
+
                     end_time=time.time()
 
                     latency_ms=int((end_time-start_time)*1000)
@@ -399,8 +308,8 @@ class Orchestrator:
                         }
                     )
 
-                    
-                    ## flush all 
+
+                    ## flush all
                     self._flush_observation()
 
                     return {
@@ -658,40 +567,37 @@ class Orchestrator:
     def _guadrails_check(
         self,
         sql_query:str
-       ) -> bool:
+       ) -> dict:
         """
         Validate a generated SQL query through the guardrails layer.
 
-        Calls :meth:`SQLGuardRails.is_validate` to determine whether the
-        query is safe to execute (e.g. no destructive DDL/DML, no injection
-        patterns), then records the safety verdict and latency in the current
-        observation span.
+        Calls :meth:`SQLGuardRails.is_validate` and records the verdict in
+        the current observation span.
 
         Args:
             sql_query (str): The raw SQL statement produced by the SQL
                 generation agent.
 
         Returns:
-            bool: ``True`` if the query passes all guardrail checks and is
-            safe to execute; ``False`` otherwise.
+            dict: ``{"is_valid": bool, "reason": str | None}`` from
+            :meth:`SQLGuardRails.is_validate`.
         """
-        ## check if sql query is safe using guardrails
         start_time=time.time()
-        is_safe=self.guardrails.is_validate(sql_query=sql_query)
+        guardrail_result=self.guardrails.is_validate(sql_query=sql_query)
         end_time=time.time()
         latency_ms=int((end_time-start_time)*1000)
 
-        ## update guardrails observation
         _update_current_observation(
             input=sql_query,
-            output=is_safe,
+            output=guardrail_result["is_valid"],
             metadata={
                 "stage":"guardrails_stage",
                 "latency_ms":latency_ms,
+                "reason":guardrail_result.get("reason"),
             }
         )
 
-        return is_safe
+        return guardrail_result
     
     ##=============================================
     ## Database Execution and Update Observation
@@ -764,9 +670,46 @@ class Orchestrator:
         latency_ms=int((end_time-start_time)*1000)
 
         logger.info("Result Interpreter agent is completed")
+        ## update visualization observation
+
+        if visualization["type"]=="chart":
+            _update_current_observation(
+                input=user_query,
+                output=visualization,
+                metadata={
+                    "stage":"visualization_stage",
+                    "type":visualization["chart_type"],
+                    "insights":visualization["insights"],
+                    "token_cost":visualization['token_cost'],
+                },
+                model="gpt-4o-mini",
+                usage={
+                    "input":0,
+                    "output":0,
+                    "total":visualization['total_tokens']
+                }
+            )
+
+            return{
+                "type":visualization["chart_type"],
+                "insights":visualization["insights"],
+                "latency_ms":latency_ms
+            }
+        
+        else:
+            _update_current_observation(
+            input=user_query,
+            output=visualization,
+            metadata={
+                "stage":"visualization_stage",
+                "type":visualization["type"],
+                "insights":visualization["content"]
+            }
+        )
 
         return{
             "type":visualization["type"],
+            "insights":visualization["content"],
             "latency_ms":latency_ms
         }
 

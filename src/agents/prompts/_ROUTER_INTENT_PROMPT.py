@@ -78,9 +78,9 @@ _ROUTER_INTENT="""
       - asks about the system itself
       - is conversational or informational without data retrieval
  
- Output strictly in JSON:
+ Output ONLY the following JSON — no markdown, no explanation, no extra text:
 
- {"label":"SQL" | "GENERAL"}
+ {"label":"SQL"}   or   {"label":"GENERAL"}
 
- Do not include any explanation.
+ The value of "label" must be exactly "SQL" or "GENERAL" in uppercase.
 """
